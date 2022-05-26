@@ -1,7 +1,11 @@
 import BuildHelper._
 import Dependencies._
+import sbt.librarymanagement.ScalaArtifacts.isScala3
 
 val releaseDrafterVersion = "5"
+
+// Setting default log level to INFO
+val _ = sys.props += ("ZHttpLogLevel" -> "INFO")
 
 // CI Configuration
 ThisBuild / githubWorkflowJavaVersions   := Seq(JavaSpec.graalvm("21.1.0", "11"), JavaSpec.temurin("8"))
@@ -86,6 +90,7 @@ lazy val root = (project in file("."))
     zhttp,
     zhttpBenchmarks,
     zhttpTest,
+    zhttpLogging,
     example,
   )
 
@@ -95,8 +100,7 @@ lazy val zhttp = (project in file("zio-http"))
   .settings(meta)
   .settings(
     testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
-    libraryDependencies ++= Seq(
-      netty,
+    libraryDependencies ++= netty ++ Seq(
       `zio`,
       `zio-streams`,
       `zio-test`,
@@ -107,6 +111,7 @@ lazy val zhttp = (project in file("zio-http"))
       `zio-schema-json`,
     ),
   )
+  .dependsOn(zhttpLogging)
 
 lazy val zhttpBenchmarks = (project in file("zio-http-benchmarks"))
   .enablePlugins(JmhPlugin)
@@ -120,9 +125,23 @@ lazy val zhttpTest = (project in file("zio-http-test"))
   .settings(stdSettings("zhttp-test"))
   .settings(publishSetting(true))
 
+lazy val zhttpLogging = (project in file("zio-http-logging"))
+  .settings(stdSettings("zhttp-logging"))
+  .settings(publishSetting(false))
+  .settings(
+    libraryDependencies ++= {
+      if (isScala3(scalaVersion.value)) Seq.empty
+      else Seq(reflect.value % Provided)
+    },
+  )
+  .settings(
+    testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"),
+    libraryDependencies ++= Seq(`zio-test`, `zio-test-sbt`),
+  )
+
 lazy val example = (project in file("./example"))
   .settings(stdSettings("example"))
   .settings(publishSetting(false))
-  .settings(runSettings("example.Main"))
+  .settings(runSettings("example.HelloWorld"))
   .settings(libraryDependencies ++= Seq(`jwt-core`))
   .dependsOn(zhttp)

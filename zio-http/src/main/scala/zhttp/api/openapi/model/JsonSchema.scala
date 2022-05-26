@@ -2,8 +2,8 @@ package zhttp.api.openapi.model
 
 import zio.json.ast.Json
 import zio.json.internal.Write
-import zio.schema._
 import zio.json.{DeriveJsonEncoder, JsonEncoder}
+import zio.schema._
 
 sealed trait SchemaObject extends Product with Serializable { self =>
   def withNullable: SchemaObject =

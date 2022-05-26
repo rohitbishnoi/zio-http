@@ -1,13 +1,13 @@
 package example.api
 
+import example.api.Domain._
+import zhttp.api._
+import zhttp.api.openapi.OpenApiInterpreter
 import zhttp.http.HttpApp
 import zhttp.service.{ChannelFactory, EventLoopGroup}
 import zio._
-import zhttp.api._
-import zhttp.api.openapi.OpenApiInterpreter
 import zio.json.{uuid => _, _}
 import zio.schema.{DeriveSchema, Schema}
-import Domain._
 
 import java.util.UUID
 

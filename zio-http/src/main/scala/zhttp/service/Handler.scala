@@ -4,10 +4,10 @@ import io.netty.channel.ChannelHandler.Sharable
 import io.netty.channel.{ChannelHandlerContext, SimpleChannelInboundHandler}
 import io.netty.handler.codec.http._
 import zhttp.http._
+import zhttp.logging.Logger
+import zhttp.service.Handler.log
 import zhttp.service.server.WebSocketUpgrade
 import zio.{UIO, ZIO}
-
-import java.net.{InetAddress, InetSocketAddress}
 
 @Sharable
 private[zhttp] final case class Handler[R](
@@ -19,7 +19,7 @@ private[zhttp] final case class Handler[R](
     with WebSocketUpgrade[R] { self =>
 
   override def channelRead0(ctx: Ctx, msg: HttpObject): Unit = {
-
+    log.debug(s"Message: ${msg.getClass.getSimpleName}")
     implicit val iCtx: ChannelHandlerContext = ctx
     msg match {
       case jReq: FullHttpRequest =>
@@ -35,15 +35,13 @@ private[zhttp] final case class Handler[R](
 
               override def headers: Headers = Headers.make(jReq.headers())
 
-              override def remoteAddress: Option[InetAddress] = getRemoteAddress
+              override def data: HttpData = HttpData.fromByteBuf(jReq.content())
 
-              override def data: HttpData   = HttpData.fromByteBuf(jReq.content())
               override def version: Version = Version.unsafeFromJava(jReq.protocolVersion())
 
-              /**
-               * Gets the HttpRequest
-               */
               override def unsafeEncode: HttpRequest = jReq
+
+              override def unsafeContext: Ctx = ctx
 
             },
           )
@@ -52,6 +50,7 @@ private[zhttp] final case class Handler[R](
         }
       case jReq: HttpRequest     =>
         val hasBody = canHaveBody(jReq)
+        log.debug(s"HasBody: ${hasBody}")
         if (hasBody) ctx.channel().config().setAutoRead(false): Unit
         try
           unsafeRun(
@@ -63,22 +62,24 @@ private[zhttp] final case class Handler[R](
                 HttpData.UnsafeAsync(callback =>
                   ctx
                     .pipeline()
-                    .addAfter(HTTP_REQUEST_HANDLER, HTTP_CONTENT_HANDLER, new RequestBodyHandler(callback)): Unit,
+                    .addAfter(
+                      HTTP_REQUEST_HANDLER,
+                      HTTP_CONTENT_HANDLER,
+                      new RequestBodyHandler(callback(ctx)),
+                    ): Unit,
                 )
 
               override def headers: Headers = Headers.make(jReq.headers())
 
               override def method: Method = Method.fromHttpMethod(jReq.method())
 
-              override def remoteAddress: Option[InetAddress] = getRemoteAddress(ctx)
+              override def url: URL = URL.fromString(jReq.uri()).getOrElse(null)
 
-              override def url: URL         = URL.fromString(jReq.uri()).getOrElse(null)
               override def version: Version = Version.unsafeFromJava(jReq.protocolVersion())
 
-              /**
-               * Gets the HttpRequest
-               */
               override def unsafeEncode: HttpRequest = jReq
+
+              override def unsafeContext: Ctx = ctx
             },
           )
         catch {
@@ -95,17 +96,10 @@ private[zhttp] final case class Handler[R](
 
   }
 
-  private def getRemoteAddress(implicit ctx: Ctx) = {
-    ctx.channel().remoteAddress() match {
-      case m: InetSocketAddress => Some(m.getAddress)
-      case _                    => None
-    }
-  }
-
   private def canHaveBody(req: HttpRequest): Boolean = {
     req.method() == HttpMethod.TRACE ||
-    req.headers().get(HttpHeaderNames.CONTENT_LENGTH) != null ||
-    req.headers().get(HttpHeaderNames.TRANSFER_ENCODING) != null
+    req.headers().contains(HttpHeaderNames.CONTENT_LENGTH) ||
+    req.headers().contains(HttpHeaderNames.TRANSFER_ENCODING)
   }
 
   /**
@@ -174,4 +168,8 @@ private[zhttp] final case class Handler[R](
     config.error.fold(super.exceptionCaught(ctx, cause))(f => runtime.unsafeRun(ctx)(f(cause)))
   }
 
+}
+
+object Handler {
+  val log: Logger = Log.withTags("Server", "Request")
 }

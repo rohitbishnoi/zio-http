@@ -1,10 +1,10 @@
 package zhttp.api.openapi
 
-import zhttp.api.openapi.model._
-import zio.schema._
-import zhttp.api._
 import zhttp.api.Route._
+import zhttp.api._
+import zhttp.api.openapi.model._
 import zio.json.EncoderOps
+import zio.schema._
 
 import java.util.UUID
 

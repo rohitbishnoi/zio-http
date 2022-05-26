@@ -24,8 +24,9 @@ object ServerSpec extends HttpRunnableSpec {
   private val env =
     EventLoopGroup.nio() ++ ChannelFactory.nio ++ ServerChannelFactory.nio ++ DynamicServer.live
 
+  private val MaxSize             = 1024 * 10
   private val app                 =
-    serve(DynamicServer.app, Some(Server.requestDecompression(true) ++ Server.enableObjectAggregator(4096)))
+    serve(DynamicServer.app, Some(Server.requestDecompression(true) ++ Server.enableObjectAggregator(MaxSize)))
   private val appWithReqStreaming = serve(DynamicServer.app, Some(Server.requestDecompression(true)))
 
   def dynamicAppSpec = suite("DynamicAppSpec") {
@@ -104,6 +105,12 @@ object ServerSpec extends HttpRunnableSpec {
           testM("one char") {
             val res = app.deploy.bodyAsString.run(content = HttpData.fromString("1"))
             assertM(res)(equalTo("1"))
+          } +
+          testM("data") {
+            val dataStream = ZStream.repeat("A").take(MaxSize.toLong)
+            val app        = Http.collect[Request] { case req => Response(data = req.data) }
+            val res = app.deploy.bodyAsByteBuf.map(_.readableBytes()).run(content = HttpData.fromStream(dataStream))
+            assertM(res)(equalTo(MaxSize))
           }
       } +
       suite("headers") {
@@ -152,7 +159,7 @@ object ServerSpec extends HttpRunnableSpec {
       Response.text(req.contentLength.getOrElse(-1).toString)
     }
     testM("has content-length") {
-      checkAllM(Gen.alphaNumericString) { string =>
+      checkM(Gen.alphaNumericString) { string =>
         val res = app.deploy.bodyAsString.run(content = HttpData.fromString(string))
         assertM(res)(equalTo(string.length.toString))
       }
@@ -166,7 +173,7 @@ object ServerSpec extends HttpRunnableSpec {
 
   def responseSpec = suite("ResponseSpec") {
     testM("data") {
-      checkAllM(nonEmptyContent) { case (string, data) =>
+      checkM(nonEmptyContent) { case (string, data) =>
         val res = Http.fromData(data).deploy.bodyAsString.run()
         assertM(res)(equalTo(string))
       }
@@ -193,7 +200,7 @@ object ServerSpec extends HttpRunnableSpec {
 
       } +
       testM("header") {
-        checkAllM(HttpGen.header) { case header @ (name, value) =>
+        checkM(HttpGen.header) { case header @ (name, value) =>
           val res = Http.ok.addHeader(header).deploy.headerValue(name).run()
           assertM(res)(isSome(equalTo(value)))
         }
@@ -264,14 +271,14 @@ object ServerSpec extends HttpRunnableSpec {
       val app: Http[Any, Throwable, Request, Response] = Http.collect[Request] { case req =>
         Response(data = HttpData.fromStream(req.bodyAsStream))
       }
-      checkAllM(Gen.alphaNumericString) { c =>
+      checkM(Gen.alphaNumericString) { c =>
         assertM(app.deploy.bodyAsString.run(path = !!, method = Method.POST, content = HttpData.fromString(c)))(
           equalTo(c),
         )
       }
     } +
       testM("FromASCIIString: toHttp") {
-        checkAllM(Gen.anyASCIIString) { payload =>
+        checkM(Gen.anyASCIIString) { payload =>
           val res = HttpData.fromAsciiString(AsciiString.cached(payload)).toHttp.map(_.toString(HTTP_CHARSET))
           assertM(res.run())(equalTo(payload))
         }
@@ -299,6 +306,6 @@ object ServerSpec extends HttpRunnableSpec {
       val spec = dynamicAppSpec + responseSpec + requestSpec + requestBodySpec + serverErrorSpec
       suiteM("app without request streaming") { app.as(List(spec)).useNow } +
         suiteM("app with request streaming") { appWithReqStreaming.as(List(spec)).useNow }
-    }.provideCustomLayerShared(env) @@ timeout(20 seconds)
+    }.provideCustomLayerShared(env) @@ timeout(10 seconds)
 
 }

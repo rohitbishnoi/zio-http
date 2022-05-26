@@ -1,6 +1,6 @@
 package zhttp.api
 
-import zhttp.http.{Method, Headers => _, Path => _}
+import zhttp.http.{Headers => _, Method, Path => _}
 import zio.schema.Schema
 
 /**
