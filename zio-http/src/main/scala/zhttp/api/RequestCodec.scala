@@ -4,30 +4,30 @@ import zhttp.http.Request
 import zio.schema.Schema
 
 /**
- * A RequestParser is a description of a Route, Query Parameters, and Headers.:
+ * A RequestCodec is a description of a Route, Query Parameters, and Headers.:
  *   - Route: /users/:id/posts
  *   - Query Parameters: ?page=1&limit=10
  *   - Headers: X-User-Id: 1 or Accept: application/json
  */
-sealed trait RequestParser[A] extends Product with Serializable { self =>
-  private[api] def ++[B](that: RequestParser[B])(implicit zipper: Zipper[A, B]): RequestParser[zipper.Out] =
-    RequestParser.ZipWith[A, B, zipper.Out](self, that, zipper.zip(_, _), zipper.unzip)
+sealed trait RequestCodec[A] extends Product with Serializable { self =>
+  private[api] def ++[B](that: RequestCodec[B])(implicit zipper: Zipper[A, B]): RequestCodec[zipper.Out] =
+    RequestCodec.ZipWith[A, B, zipper.Out](self, that, zipper.zip(_, _), zipper.unzip)
 
-  def map[B](f: A => B)(g: B => A): RequestParser[B] =
-    RequestParser.Map(self, f, g)
+  def map[B](f: A => B)(g: B => A): RequestCodec[B] =
+    RequestCodec.Map(self, f, g)
 
   private[api] def getRoute: Route[_] = {
-    def getRouteImpl(requestParser: RequestParser[_]): Option[Route[_]] =
-      requestParser match {
-        case RequestParser.ZipWith(left, right, _, _) =>
+    def getRouteImpl(requestCodec: RequestCodec[_]): Option[Route[_]] =
+      requestCodec match {
+        case RequestCodec.ZipWith(left, right, _, _) =>
           getRouteImpl(left) orElse getRouteImpl(right)
-        case RequestParser.Map(info, _, _)            =>
+        case RequestCodec.Map(info, _, _)            =>
           getRouteImpl(info)
-        case _: Header[_]                             =>
+        case _: Header[_]                            =>
           None
-        case _: Query[_]                              =>
+        case _: Query[_]                             =>
           None
-        case route: Route[_]                          =>
+        case route: Route[_]                         =>
           Some(route)
       }
 
@@ -36,39 +36,39 @@ sealed trait RequestParser[A] extends Product with Serializable { self =>
 
   private[api] def getQueryParams: Option[Query[_]] =
     self match {
-      case zip: RequestParser.ZipWith[_, _, _] =>
+      case zip: RequestCodec.ZipWith[_, _, _] =>
         (zip.left.getQueryParams, zip.right.getQueryParams) match {
           case (Some(left), Some(right)) => Some(left ++ right)
           case (Some(left), None)        => Some(left)
           case (None, Some(right))       => Some(right)
           case (None, None)              => None
         }
-      case RequestParser.Map(info, _, _)       =>
+      case RequestCodec.Map(info, _, _)       =>
         info.getQueryParams
-      case route: Query[_]                     =>
+      case route: Query[_]                    =>
         Some(route)
-      case _: Header[_]                        =>
+      case _: Header[_]                       =>
         None
-      case _: Route[_]                         =>
+      case _: Route[_]                        =>
         None
     }
 
   private[api] def getHeaders: Option[Header[_]] =
     self match {
-      case zip: RequestParser.ZipWith[_, _, _] =>
+      case zip: RequestCodec.ZipWith[_, _, _] =>
         (zip.left.getHeaders, zip.right.getHeaders) match {
           case (Some(left), Some(right)) => Some(left ++ right)
           case (Some(left), None)        => Some(left)
           case (None, Some(right))       => Some(right)
           case (None, None)              => None
         }
-      case RequestParser.Map(info, _, _)       =>
+      case RequestCodec.Map(info, _, _)       =>
         info.getHeaders
-      case route: Header[_]                    =>
+      case route: Header[_]                   =>
         Some(route)
-      case _: Query[_]                         =>
+      case _: Query[_]                        =>
         None
-      case _: Route[_]                         =>
+      case _: Route[_]                        =>
         None
     }
 
@@ -77,13 +77,13 @@ sealed trait RequestParser[A] extends Product with Serializable { self =>
   private[api] def parseRequestImpl(request: Request): A
 }
 
-object RequestParser {
+object RequestCodec {
   private[api] final case class ZipWith[A, B, C](
-    left: RequestParser[A],
-    right: RequestParser[B],
+    left: RequestCodec[A],
+    right: RequestCodec[B],
     f: (A, B) => C,
     g: C => (A, B),
-  ) extends RequestParser[C] {
+  ) extends RequestCodec[C] {
 
     override private[api] def parseRequestImpl(request: Request): C = {
       val a = left.parseRequestImpl(request)
@@ -94,7 +94,7 @@ object RequestParser {
     }
   }
 
-  private[api] final case class Map[A, B](info: RequestParser[A], f: A => B, g: B => A) extends RequestParser[B] {
+  private[api] final case class Map[A, B](info: RequestCodec[A], f: A => B, g: B => A) extends RequestCodec[B] {
     override private[api] def parseRequestImpl(request: Request): B = {
       val a = info.parseRequestImpl(request)
       if (a == null) return null.asInstanceOf[B]
@@ -106,7 +106,7 @@ object RequestParser {
 /**
  * =HEADERS=
  */
-sealed trait Header[A] extends RequestParser[A] {
+sealed trait Header[A] extends RequestCodec[A] {
   self =>
 
   def ? : Header[Option[A]] =
@@ -176,7 +176,7 @@ object Header {
 /**
  * QUERY PARAMS \============
  */
-sealed trait Query[A] extends RequestParser[A] { self =>
+sealed trait Query[A] extends RequestCodec[A] { self =>
   def ? : Query[Option[A]] = Query.Optional(self)
 
   def ++[B](that: Query[B])(implicit zipper: Zipper[A, B]): Query[zipper.Out] =
@@ -239,7 +239,7 @@ object Query {
  *   - ex: /users/:id/friends/:friendId
  *   - ex: /posts/:id/comments/:commentId
  */
-sealed trait Route[A] extends RequestParser[A] { self =>
+sealed trait Route[A] extends RequestCodec[A] { self =>
   def ??(doc: Doc): Route[A] = ???
 
   override def map[B](f: A => B)(g: B => A): Route[B] =
@@ -262,7 +262,7 @@ sealed trait Route[A] extends RequestParser[A] { self =>
   // throw without StackTrace
   // - use a special exception construction, pass null in everywhere
   // - sad path
-  // - BUILD A RESPONSE TREE! RequestParser ++ RequestParser
+  // - BUILD A RESPONSE TREE! RequestCodec ++ RequestCodec
   // Kleisli OrElse — EGAD!
   // Akka  fallback  — EGAD!
 
