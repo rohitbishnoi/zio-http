@@ -3,7 +3,7 @@ package example.api
 import example.api.Domain._
 import zhttp.api._
 import zhttp.api.openapi.OpenApiInterpreter
-import zhttp.http.HttpApp
+import zhttp.http.{Headers, HttpApp, Status}
 import zhttp.service.{ChannelFactory, EventLoopGroup}
 import zio._
 import zio.json.{uuid => _, _}
@@ -84,8 +84,10 @@ object ComplexExample extends App {
     }
 
   val deleteTalkHandler =
-    Handler.make(deleteTalk) { case (uuid, _) =>
-      Talks.delete(uuid)
+    deleteTalk.handleWith { uuid =>
+      Talks.delete(uuid).map { resp =>
+        ApiResponse((), Headers.empty, Status.Found)
+      }
     }
 
   val handlers =
